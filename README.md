@@ -56,6 +56,10 @@ window.
 State goes to `$RUN_DETACHED_HOME`, or by default to `%LOCALAPPDATA%\run-detached` on Windows
 and `$XDG_CACHE_HOME/run-detached` (`~/.cache/run-detached`) elsewhere.
 
+`--launch` waits up to 120 s for the watcher to record its pid before it reports a failure
+(`RUN_DETACHED_CONFIRM_S` changes it). On a starved machine a low-priority Python process can
+take more than 10 s just to start, and a shorter window reported a running command as failed.
+
 ## Using it with Claude Code
 
 Allow the tool in `.claude/settings.json`, so the agent does not stop for a permission prompt

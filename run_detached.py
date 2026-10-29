@@ -36,7 +36,7 @@ import subprocess
 import sys
 import time
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 if sys.stdout is not None:  # the detached watcher has no stdout
     try:
@@ -50,6 +50,15 @@ _BREAKAWAY = 0x01000000  # CREATE_BREAKAWAY_FROM_JOB: leave the parent's job obj
 # Negative control for the tests only: run the command as a NORMAL child of the launcher (what a
 # plain background shell does). The survival test must fail with this set. Not a usage mode.
 _NO_DETACH_ENV = "RUN_DETACHED_NO_DETACH"
+
+# How long --launch waits for the watcher to record its pid before reporting a failure. It was a
+# fixed 10 s: on a starved machine (a below-normal priority process can take well over 10 s just to
+# start Python) the watcher recorded its pid at 19 s, --launch reported "failed" (rc 3) and the
+# command then ran to completion with rc 0. Override with RUN_DETACHED_CONFIRM_S.
+CONFIRM_S = float(os.environ.get("RUN_DETACHED_CONFIRM_S") or 120)
+
+# Tests only: delay the watcher before it records its pid, to simulate a slow start.
+_WATCHER_DELAY_ENV = "RUN_DETACHED_WATCHER_DELAY_S"
 
 
 def base_dir() -> pathlib.Path:
@@ -164,6 +173,9 @@ def _run(name: str) -> int:
     cmd = st["cmd"]
     env = dict(os.environ, PYTHONUNBUFFERED="1")
     env.pop(_NO_DETACH_ENV, None)
+    delay = env.pop(_WATCHER_DELAY_ENV, None)
+    if delay:
+        time.sleep(float(delay))
     no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
     st.update(state="running", pid=os.getpid(), started=_now())
     with open(folder / "log.txt", "ab") as log:
@@ -204,15 +216,18 @@ def launch(name: str, cmd: list, cwd=None, quiet: bool = False) -> int:
     if r.returncode != 0:
         print(f"  starter failed rc={r.returncode}: {(r.stderr or r.stdout)[-400:]}")
         return RC_FAILED
-    for _ in range(50):  # confirm the watcher wrote its pid; do not claim victory on Popen
+    limit = time.time() + CONFIRM_S
+    while True:  # confirm the watcher wrote its pid; do not claim victory on Popen
         st = _read(folder / "status.json")
         if st.get("pid"):
             if not quiet:
                 print(f"  launched detached . '{name}' . watcher pid {st['pid']} . log {st['log']}")
                 print(f"  check: --status {name}   wait: --wait {name} --timeout SECONDS")
             return RC_FINISHED
+        if time.time() >= limit:
+            break
         time.sleep(0.2)
-    print(f"  watcher did not record its pid within 10 s; see {folder / 'log.txt'}")
+    print(f"  watcher did not record its pid within {CONFIRM_S:.0f} s; see {folder / 'log.txt'}")
     return RC_FAILED
 
 

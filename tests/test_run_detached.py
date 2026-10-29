@@ -75,6 +75,18 @@ class RunDetachedTest(unittest.TestCase):
         self.assertLess(time.time() - t0, 5, "--timeout is not hard")
         self.assertEqual(rd.wait("slow", 30, quiet=True), rd.RC_FINISHED)
 
+    def test_slow_watcher_is_not_reported_as_failed(self):
+        """The watcher records its pid 15 s after --launch (a starved machine). --launch must
+        report it as launched, and the command must run to completion. With the old fixed
+        10 s window (RUN_DETACHED_CONFIRM_S=10) this test fails."""
+        os.environ[rd._WATCHER_DELAY_ENV] = "15"
+        try:
+            rc = rd.launch("slowstart", [PY, "-c", "print('slow ok')"], quiet=True)
+        finally:
+            os.environ.pop(rd._WATCHER_DELAY_ENV, None)
+        self.assertEqual(rc, rd.RC_FINISHED, "a watcher that is slow to start was reported as failed")
+        self.assertEqual(rd.wait("slowstart", 60, quiet=True), rd.RC_FINISHED)
+
     def test_unknown_and_invalid_names(self):
         self.assertEqual(rd.wait("does_not_exist", 1, quiet=True), rd.RC_USAGE)
         with self.assertRaises(SystemExit):
